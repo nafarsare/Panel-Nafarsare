@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#1d1d1f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="robots" content="noindex">
+<title>Panel de gestión</title>
+<!--
+  🔐 PÁGINA DE ENTRADA AL PANEL (p. ej. panel.ejemplo.org)
+  ─────────────────────────────────────────────────────────
+  Este archivo NO va en Apps Script: se sube al dominio del cliente (GitHub Pages, hosting…)
+  con el nombre index.html. Pasos en docs/05_DESPLIEGUE.md.
+  Rellena solo PANEL_CONFIG:
+-->
+<script>
+  var PANEL_CONFIG = {
+    // 1) ID de cliente de Google (el mismo que 00_Config.gs › PANEL_LOGIN.clientId)
+    clientId: "",
+    // 2) URL de la Web App (Implementar › Gestionar implementaciones › la URL que acaba en /exec)
+    api: "",
+    // 3) Marca
+    nombre: "Nafarsare",
+    logo: { texto: "nafar", acento: "sare" },
+    lema: "Clientes, trabajo y facturación",
+    colores: { oscuro: "#0d1b2a", acento: "#f4511e" },
+    pie: "Panel hecho por Nafarsare · nafarsare.com",
+    textoEntrada: "Entra con tu cuenta de Google de Nafarsare."
+  };
+</script>
+<script src="https://accounts.google.com/gsi/client" async defer onload="window.__pnIniciar && window.__pnIniciar()"></script>
+<style>
+  *{box-sizing:border-box}
+  :root{--osc:#1d1d1f;--acento:#e53935}
+  html,body{margin:0;min-height:100%;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1d1d1f;background:var(--osc)}
+  .fondo{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:var(--osc)}
+  .tarjeta{width:100%;max-width:400px;background:#fff;border-radius:24px;padding:30px 24px 24px;box-shadow:0 20px 60px rgba(0,0,0,.45);text-align:center}
+  .logo{font-weight:800;font-size:38px;letter-spacing:.5px;color:var(--osc);line-height:1} .logo b{color:var(--acento)}
+  .lema{color:#6b6f7b;font-size:13px;margin-top:6px}
+  h1{font-size:19px;margin:26px 0 6px} p{color:#555;font-size:14px;margin:0 0 18px}
+  #boton{display:flex;justify-content:center;min-height:44px}
+  .estado{margin-top:16px;font-size:14px;color:#555;min-height:20px} .estado.error{color:#a3201d}
+  .aviso{background:#fff6d6;color:#7a5d00;border-radius:12px;padding:12px;font-size:14px;margin-top:16px;text-align:left}
+  .btn{display:block;width:100%;border:0;border-radius:12px;padding:12px;font-weight:700;font-size:15px;cursor:pointer;margin-top:10px}
+  .btn.p{background:var(--osc);color:#fff} .btn.s{background:#eef0f4;color:#1d1d1f}
+  .pie{color:#9a9da6;font-size:12px;margin-top:22px}
+  .giro{display:inline-block;width:18px;height:18px;border:3px solid #e3e5ea;border-top-color:var(--acento);border-radius:50%;animation:g 1s linear infinite;vertical-align:-4px;margin-right:6px}
+  @keyframes g{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="fondo">
+  <div class="tarjeta">
+    <div class="logo" id="logo"></div>
+    <div class="lema" id="lema"></div>
+    <div id="caja">
+      <h1>Panel de gestión</h1>
+      <p id="txtEntrada"></p>
+      <div id="boton"></div>
+      <div class="estado" id="estado"><span class="giro"></span>Cargando…</div>
+    </div>
+    <div class="pie" id="pie"></div>
+  </div>
+</div>
+
+<script>
+/* Todo va dentro de una función: el panel que se muestra después comparte la misma ventana. */
+(function () {
+const C = PANEL_CONFIG, CLIENT_ID = C.clientId, API_URL = C.api;
+const CLAVE = "panel_" + (C.nombre || "x").toLowerCase().replace(/[^a-z0-9]+/g, "");
+const $ = id => document.getElementById(id);
+const escT = s => String(s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let credencial = null, sesionGoogle = false;
+
+document.documentElement.style.setProperty("--osc", (C.colores || {}).oscuro || "#1d1d1f");
+document.documentElement.style.setProperty("--acento", (C.colores || {}).acento || "#e53935");
+$("logo").innerHTML = escT((C.logo || {}).texto || C.nombre) + "<b>" + escT((C.logo || {}).acento || "") + "</b>";
+$("lema").textContent = C.lema || "";
+$("txtEntrada").textContent = C.textoEntrada || "";
+$("pie").textContent = "🔒 Tu sesión es privada" + (C.pie ? " · " + C.pie : "");
+document.title = (C.nombre || "Panel") + " · Panel";
+
+const SIN_CONEXION = "No se ha podido conectar con el panel. Comprueba tu conexión y vuelve a intentarlo. " +
+  "Si sigue pasando, avisa a administración: puede que la versión nueva del panel necesite que se autoricen sus permisos en el editor de Apps Script.";
+function post(datos) {
+  return fetch(API_URL, {
+    method: "POST", redirect: "follow",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },   /* sin «preflight»: Apps Script no lo admite */
+    body: JSON.stringify(datos)
+  }).then(r => r.text().then(t => ({ st: r.status, t: t })), e => { console.error("Panel · fetch:", e); throw new Error(SIN_CONEXION + " (sin respuesta del servidor)"); })
+    .then(x => {
+      try { return JSON.parse(x.t); }
+      catch (e) {
+        console.error("Panel · respuesta no válida", x.st, x.t.slice(0, 500));
+        const pista = (x.t.match(/<title>([^<]*)<\/title>/i) || [])[1] || x.t.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 140);
+        throw new Error(SIN_CONEXION + " (respuesta " + x.st + (pista ? ": " + pista : "") + ")");
+      }
+    });
+}
+function estado(t, error) { const e = $("estado"); if (!e) return; e.innerHTML = t; e.className = "estado" + (error ? " error" : ""); }
+
+/* Sustituto de google.script.run para las páginas de Apps Script mostradas aquí */
+function instalarPuente() {
+  window.google = window.google || {};
+  const llamar = (fn, args) => post({ tipo: "run", fn: fn, args: args }).then(r => {
+    if (!r.ok) {
+      if (sesionGoogle && /ya no es válido|desactivado|caducado|se ha cerrado/i.test(r.error || "") && !sessionStorage.getItem(CLAVE + "_reentrando")) {
+        sessionStorage.setItem(CLAVE + "_reentrando", "1"); location.reload();   /* la sesión ha caducado: se vuelve a entrar sola */
+      }
+      throw new Error(r.error || "Error");
+    }
+    sessionStorage.removeItem(CLAVE + "_reentrando");
+    return r.r;
+  });
+  const nuevo = () => {
+    let ok = () => {}, ko = e => console.error(e), usuario;
+    const base = { withSuccessHandler(f) { ok = f; return px; }, withFailureHandler(f) { ko = f; return px; }, withUserObject(u) { usuario = u; return px; } };
+    const px = new Proxy(base, { get(t, k) {
+      if (k in t) return t[k];
+      return (...args) => { llamar(String(k), args).then(x => ok(x, usuario), e => ko(e, usuario)); };
+    } });
+    return px;
+  };
+  const script = { host: { close() {}, setHeight() {}, setWidth() {}, origin: location.origin } };
+  Object.defineProperty(script, "run", { get: nuevo });
+  window.google.script = script;
+  window.__salir = salir;
+}
+function mostrar(html, titulo) {
+  instalarPuente();
+  const meta = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">';
+  html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, m => m + meta) : meta + html;
+  document.open(); document.write(html); document.close();
+  if (titulo) document.title = titulo;
+}
+
+/* Páginas públicas (?accion=…): sin entrar con Google */
+const params = Object.fromEntries(new URLSearchParams(location.search));
+const esPublica = params.accion && params.accion !== "entrar";
+if (!API_URL) { $("caja").innerHTML = '<div class="aviso">⚙️ Falta poner la dirección de la Web App en PANEL_CONFIG.api (index.html).</div>'; return; }
+if (esPublica) {
+  $("caja").innerHTML = '<div class="estado"><span class="giro"></span>Cargando…</div>';
+  post({ tipo: "pagina", p: params })
+    .then(r => r.ok ? mostrar(r.html, r.titulo) : ($("caja").innerHTML = '<div class="aviso">⚠️ ' + escT(r.error || "No se pudo abrir la página.") + '</div>'))
+    .catch(e => { $("caja").innerHTML = '<div class="aviso">⚠️ ' + escT(e.message) + '</div>'; });
+}
+
+/* Entrar con Google */
+let iniciado = false;
+function iniciarGoogle() {
+  if (esPublica || iniciado) return;
+  iniciado = true;
+  if (!CLIENT_ID) return estado("⚙️ Falta el ID de cliente de Google en PANEL_CONFIG.clientId.", true);
+  if (!window.google || !google.accounts) return estado("No se ha podido cargar Google. Revisa la conexión.", true);
+  google.accounts.id.initialize({
+    client_id: CLIENT_ID, callback: alEntrar, auto_select: !localStorage.getItem(CLAVE + "_salio"),
+    cancel_on_tap_outside: false, use_fedcm_for_prompt: true, itp_support: true
+  });
+  google.accounts.id.renderButton($("boton"), { theme: "filled_black", size: "large", shape: "pill", text: "signin_with", locale: "es", width: 280 });
+  estado("");
+  if (!localStorage.getItem(CLAVE + "_salio")) google.accounts.id.prompt();
+}
+function alEntrar(resp) {
+  credencial = resp.credential;
+  localStorage.removeItem(CLAVE + "_salio");
+  estado('<span class="giro"></span>Entrando…');
+  post({ tipo: "entrar", idToken: credencial }).then(r => {
+    if (r.ok) { sesionGoogle = true; mostrar(r.html, (C.nombre || "") + " · Panel"); return; }
+    if (r.sinAcceso) {
+      $("caja").innerHTML = `<h1>Sin acceso todavía</h1>
+        <div class="aviso">La cuenta <b>${escT(r.correo)}</b> no tiene acceso al panel.</div>
+        <button class="btn p" onclick="__pnPedir()">Pedir acceso a administración</button>
+        <button class="btn s" onclick="__pnOtra()">Entrar con otra cuenta</button>
+        <div class="estado" id="estado"></div>`;
+      return;
+    }
+    estado("⚠️ " + escT(r.error || "No se ha podido entrar."), true);
+  }).catch(e => estado("⚠️ " + escT(e.message), true));
+}
+function pedirAcceso() {
+  estado('<span class="giro"></span>Enviando…');
+  post({ tipo: "solicitar", idToken: credencial }).then(r => estado(r.ok ? escT(r.mensaje) : "⚠️ " + escT(r.error), !r.ok), e => estado("⚠️ " + escT(e.message), true));
+}
+function otraCuenta() { try { google.accounts.id.disableAutoSelect(); } catch (e) {} location.reload(); }
+function salir(token) {
+  try { google.accounts.id.disableAutoSelect(); } catch (e) {}
+  localStorage.setItem(CLAVE + "_salio", "1");
+  const fuera = () => { location.href = location.pathname; };
+  if (token) post({ tipo: "run", fn: "cerrarSesionPanel", args: [token] }).then(fuera, fuera); else fuera();
+}
+window.__pnIniciar = iniciarGoogle;
+window.__pnPedir = pedirAcceso;
+window.__pnOtra = otraCuenta;
+if (window.google && google.accounts) iniciarGoogle();
+})();
+</script>
+</body>
+</html>
